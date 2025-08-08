@@ -6,3 +6,4 @@ Requirements
 - cvxpy
 - tqdm
 - jax
+- ecos
