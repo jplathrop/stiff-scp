@@ -17,7 +17,7 @@ class SCPSubproblem():
 
         n, m = system.state_dim(), system.action_dim()
 
-        assert dynamics_integration in ["forward_euler", "backward_euler", "matrix_exponential", "implicit_midpoint"]
+        assert dynamics_integration in ["forward_euler", "backward_euler", "matrix_exponential", "implicit"]
         self.dynamics_integration = dynamics_integration
 
         self.x0 = cp.Parameter((n))
@@ -89,16 +89,22 @@ class SCPSubproblem():
                     + self.phi[k] @ (self.x[k] - self.xnom[k])
                     + (dt * self.dfdu[k]) @ (self.u[k] - self.unom[k])
                 )
-        elif self.dynamics_integration == "implicit_midpoint":
-            # Linearize around midpoint nominal xmid_nom = (xnom[k] + xnom[k+1])/2
+        elif self.dynamics_integration == "implicit":
             for k in range(horizon):
-                constraints.append(
-                    self.x[k+1] == self.x[k]
-                    + dt * self.fnom[k]
-                    + (0.5 * dt * self.dfdx[k]) @ (self.x[k] - self.xnom[k])
-                    + (0.5 * dt * self.dfdx[k]) @ (self.x[k+1] - self.xnom[k+1])
-                    + (dt * self.dfdu[k]) @ (self.u[k] - self.unom[k])
-                )
+                if k < horizon - 1:
+                    constraints.append(
+                        self.x[k+1] == self.x[k] + dt * self.fnom[k]
+                        + 0.5 * dt * self.dfdx[k] @ (self.x[k+1] + self.x[k] - self.xnom[k+1] - self.xnom[k])
+                        + 0.5 * dt * self.dfdu[k] @ (self.u[k] + self.u[k+1] - self.unom[k] - self.unom[k+1])
+                        + (self.xnom[k+1] - self.xnom[k] - dt * self.fnom[k])
+                    )
+                else:
+                    constraints.append(
+                        self.x[k+1] == self.x[k] + dt * self.fnom[k]
+                        + 0.5 * dt * self.dfdx[k] @ (self.x[k+1] + self.x[k] - self.xnom[k+1] - self.xnom[k])
+                        + dt * self.dfdu[k] @ (self.u[k] - self.unom[k])
+                        + (self.xnom[k+1] - self.xnom[k] - dt * self.fnom[k])
+                    )
         else:
             raise RuntimeError("Unreachable code.")
         
@@ -155,12 +161,14 @@ class SCPSubproblem():
                 # Phi_k = exp(A_k * dt)
                 Phi_k = np.asarray(jax_expm(Ak * self.dt))
                 self.phi[k].save_value(Phi_k)
-            elif self.dynamics_integration == "implicit_midpoint":
-                # Evaluate derivatives at the nominal midpoint
-                xmid = 0.5 * (np.asarray(xnom[k]) + np.asarray(xnom[k+1]))
-                Ak = np.asarray(self.system.dfdx(xmid, unom[k]))
-                Bk = np.asarray(self.system.dfdu(xmid, unom[k]))
-                fk = np.asarray(self.system.f(xmid, unom[k]))
+            elif self.dynamics_integration == "implicit":
+                # midpoints of the *nominal* trajectory
+                xbar = 0.5*(np.asarray(xnom[k]) + np.asarray(xnom[k+1]))
+                ubar = 0.5*(np.asarray(unom[k]) + np.asarray(unom[k+1])) if k < self.horizon - 1 else np.asarray(unom[k])
+                Ak = np.asarray(self.system.dfdx(xbar, ubar))
+                Bk = np.asarray(self.system.dfdu(xbar, ubar))
+                fk = np.asarray(self.system.f(xbar, ubar))
+
                 self.dfdx[k].save_value(Ak)
                 self.dfdu[k].save_value(Bk)
                 self.fnom[k].save_value(fk)

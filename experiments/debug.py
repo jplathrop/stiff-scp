@@ -38,11 +38,10 @@ def debug_jacobians():
     print(f"dr2du2: {dr2du2}")
     print(f"d2rdxdu: {dr2dxdu}")
 
-def main():
+def run_traj_opt(method):
     horizon = 15
     dt = 0.2
     car = DubinsCar(xd = jax.numpy.array([1.0, 1.0, 0.0]))
-    method = "implicit_midpoint"
     scp = SCPSubproblem(car, horizon, dt, dynamics_integration=method)
 
     # xnom = np.zeros((horizon+1, 3))
@@ -53,17 +52,17 @@ def main():
     for k in range(horizon):
         xnom[k+1, :] = step(xnom[k, :], unom[k, :])
 
-    num_iterations = 30
+    num_iterations = 25
     xs = np.empty((num_iterations + 1, horizon+1, 3))
     us = np.empty((num_iterations + 1, horizon, 2))
     xs[0, :, :] = xnom
     us[0, :, :] = unom
 
     epsilon0 = 1.0
-    beta = 0.9
+    beta = 0.9 # wait this is actually important, 1.0 makes the traj opt not converge
     for i in tqdm(range(num_iterations), desc="Running SCP"):
         epsilon = epsilon0 * beta ** i
-        xsoln, usoln, cost = scp.solve(xs[i, :, :], us[i, :, :], epsilon=epsilon, cvxpy_kwargs={"verbose": True})
+        xsoln, usoln, cost = scp.solve(xs[i, :, :], us[i, :, :], epsilon=epsilon, cvxpy_kwargs={"verbose": False})
         # rollout
         xsoln[0, :] = xs[0, 0, :]
         for k in range(horizon):
@@ -90,11 +89,13 @@ def main():
     ax.plot(x_gt[:,0], x_gt[:,1], "k--", linewidth=2.0, label="RK45 ground truth")
     ax.legend()
     ax.set_aspect("equal")
+    ax.set_title(f"SCP trajectory with {method} integration, MSE: {mse:.6e}")
     plt.savefig(f"scp_trajectory_{method}.png")
-    plt.show()
-
     return
 
 if __name__ == "__main__":
-    main()
+    run_traj_opt("implicit")
+    # run_traj_opt("matrix_exponential")
+    # run_traj_opt("forward_euler")
+    # run_traj_opt("backward_euler")
     # debug_jacobians()
