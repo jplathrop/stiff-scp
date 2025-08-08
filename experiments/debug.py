@@ -3,9 +3,23 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 from tqdm import tqdm
+from scipy.integrate import solve_ivp
 
 from src.dubins_car import DubinsCar
 from src.scp import SCPSubproblem
+
+def integrate_ground_truth(car, x0, us, dt):
+    horizon = us.shape[0]
+
+    def f(t, x):
+        k = min(int(np.floor(t / dt)), horizon - 1)
+        u = us[k]
+        return np.asarray(car.f(x, u), dtype=float)
+
+    t0, tf = 0.0, float(horizon) * dt
+    t_eval = np.linspace(t0, tf, horizon + 1)
+    sol = solve_ivp(f, (t0, tf), x0, method="RK45", t_eval=t_eval, rtol=1e-8, atol=1e-10)
+    return sol.y.T
 
 def debug_jacobians():
     car = DubinsCar(xd = jax.numpy.array([1.0, 1.0, 0.0]))
@@ -28,7 +42,8 @@ def main():
     horizon = 15
     dt = 0.2
     car = DubinsCar(xd = jax.numpy.array([1.0, 1.0, 0.0]))
-    scp = SCPSubproblem(car, horizon, dt, dynamics_integration="forward_euler")
+    method = "implicit_midpoint"
+    scp = SCPSubproblem(car, horizon, dt, dynamics_integration=method)
 
     # xnom = np.zeros((horizon+1, 3))
     unom = np.ones((horizon, 2)) * 0.01
@@ -59,13 +74,23 @@ def main():
         xs[i+1, :, :] = xsoln
         us[i+1, :, :] = usoln
     
+    # Compute ground-truth rollout for the final optimized controls
+    x_opt = xs[-1]
+    u_opt = us[-1]
+    x_gt = integrate_ground_truth(car, x_opt[0], u_opt, dt)
+    mse = float(np.mean((x_opt - x_gt) ** 2))
+    print(f"MSE(opt_traj vs RK45 ground truth): {mse:.6e}")
+
     fig, ax = plt.subplots()
     cmap = matplotlib.colormaps["plasma"]
     for i, xtraj in enumerate(xs):
-        ax.plot(xtraj[:,0], xtraj[:,1], label=f"iteration {i}", c = cmap(i / len(xs)))
+        if i % 5 == 0 or i == len(xs) - 1:
+            ax.plot(xtraj[:,0], xtraj[:,1], label=f"iteration {i}", c = cmap(i / len(xs)))
+    # Overlay ground truth final trajectory
+    ax.plot(x_gt[:,0], x_gt[:,1], "k--", linewidth=2.0, label="RK45 ground truth")
     ax.legend()
     ax.set_aspect("equal")
-
+    plt.savefig(f"scp_trajectory_{method}.png")
     plt.show()
 
     return
