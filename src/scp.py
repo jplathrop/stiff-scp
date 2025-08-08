@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import cvxpy as cp
+from jax.scipy.linalg import expm as jax_expm
 
 # for integer horizon H, constructs a trajectory
 # [x_0, x_1, ..., x_H] with inputs [u_0 u_1, ..., u_H] 
@@ -13,10 +14,11 @@ class SCPSubproblem():
     def __init__(self, system, horizon, dt, dynamics_integration="forward_euler"):
         self.system = system
         self.horizon = horizon
+        self.dt = dt
 
         n, m = system.state_dim(), system.action_dim()
 
-        assert dynamics_integration in ["forward_euler", "backward_euler"]
+        assert dynamics_integration in ["forward_euler", "backward_euler", "matrix_exponential"]
         self.dynamics_integration = dynamics_integration
 
         self.x0 = cp.Parameter((n))
@@ -29,6 +31,8 @@ class SCPSubproblem():
         self.dfdx = [cp.Parameter((n, n)) for _ in range(horizon)]
         self.dfdu = [cp.Parameter((n, m)) for _ in range(horizon)]
         self.fnom = [cp.Parameter((n)) for _ in range(horizon)]
+        # Discrete-time state transition matrix for matrix exponential integration
+        self.phi = [cp.Parameter((n, n)) for _ in range(horizon)]
 
         # reward derivatives (index k suppresed)
         # R(x, u) \approx R(xn,un)
@@ -78,6 +82,14 @@ class SCPSubproblem():
                                 np.eye(n) @ (self.x[k] - self.xnom[k]) + 
                                 (dt * self.dfdx[k]) @ (self.x[k+1] - self.xnom[k+1]) +
                                 (dt * self.dfdu[k]) @ (self.u[k] - self.unom[k]))
+        elif self.dynamics_integration == "matrix_exponential":
+            # x_{k+1} ≈ x_nom[k] + dt * f_nom[k] + exp(A_k dt) (x_k - x_nom[k]) + dt * B_k (u_k - u_nom[k])
+            for k in range(horizon):
+                constraints.append(
+                    self.x[k+1] == self.xnom[k] + dt * self.fnom[k]
+                    + self.phi[k] @ (self.x[k] - self.xnom[k])
+                    + (dt * self.dfdu[k]) @ (self.u[k] - self.unom[k])
+                )
         else:
             raise RuntimeError("Unreachable code.")
         
@@ -124,6 +136,16 @@ class SCPSubproblem():
                 self.dfdx[k].save_value(np.asarray(self.system.dfdx(xnom[k+1], unom[k])))
                 self.dfdu[k].save_value(np.asarray(self.system.dfdu(xnom[k+1], unom[k])))
                 self.fnom[k].save_value(np.asarray(self.system.f(xnom[k+1], unom[k])))
+            elif self.dynamics_integration == "matrix_exponential":
+                Ak = np.asarray(self.system.dfdx(xnom[k], unom[k]))
+                Bk = np.asarray(self.system.dfdu(xnom[k], unom[k]))
+                fk = np.asarray(self.system.f(xnom[k], unom[k]))
+                self.dfdx[k].save_value(Ak)
+                self.dfdu[k].save_value(Bk)
+                self.fnom[k].save_value(fk)
+                # Phi_k = exp(A_k * dt)
+                Phi_k = np.asarray(jax_expm(Ak * self.dt))
+                self.phi[k].save_value(Phi_k)
             else:
                 raise RuntimeError("Unreachable code.")
             
