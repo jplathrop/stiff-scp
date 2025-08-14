@@ -43,10 +43,6 @@ class SCPSubproblem():
         self.Rnom = [cp.Parameter() for _ in range(horizon)]
         self.dRdx = [cp.Parameter((n)) for _ in range(horizon)]
         self.dRdu = [cp.Parameter((m)) for _ in range(horizon)]
-        # self.d2Rdx2 = [cp.Parameter((n, n), PSD = True) for _ in range(horizon)]
-        # self.d2Rdxdu = [cp.Parameter((n, m)) for _ in range(horizon)]
-        # self.d2Rdu2 = [cp.Parameter((m, m), PSD = True) for _ in range(horizon)]
-
         self.d2Rdxdu2 = [cp.Parameter((n+m, n+m), NSD = True) for _ in range(horizon)]
 
         # value deriatives
@@ -123,20 +119,16 @@ class SCPSubproblem():
             if k < horizon:
                 constraints.append(cp.norm(self.u[k] - self.unom[k]) <= self.epsilon)
 
-
-        # cost function
-        cost = 0
+        # value function
+        value = 0
         for k in range(horizon):
             xkuk = cp.hstack([self.x[k], self.u[k]])
-            cost += self.Rnom[k] + self.dRdx[k] @ (self.x[k] - self.xnom[k]) + self.dRdu[k] @ (self.u[k] - self.unom[k]) + \
+            value += self.Rnom[k] + self.dRdx[k] @ (self.x[k] - self.xnom[k]) + self.dRdu[k] @ (self.u[k] - self.unom[k]) + \
                 0.5 * cp.quad_form(xkuk, self.d2Rdxdu2[k])
-                # 0.5 * cp.quad_form(self.x[k] - self.xnom[k], self.d2Rdx2[k]) + \
-                # 1.0 * (self.x[k] - self.xnom[k]).T @ self.d2Rdxdu[k] @ (self.u[k] - self.unom[k]) + \
-                # 0.5 * cp.quad_form(self.u[k] - self.unom[k], self.d2Rdu2[k])
-        cost += self.Vnom + self.dVdx @ (self.x[horizon] - self.xnom[horizon]) + \
+        value += self.Vnom + self.dVdx @ (self.x[horizon] - self.xnom[horizon]) + \
             0.5 * cp.quad_form(self.x[horizon] - self.xnom[horizon], self.d2Vdx2)
 
-        self.problem = cp.Problem(cp.Maximize(cost), constraints)
+        self.problem = cp.Problem(cp.Maximize(value), constraints)
         assert(self.problem.is_dcp())
 
     def solve(self, xnom, unom, epsilon, cvxpy_kwargs={}):
@@ -195,8 +187,9 @@ class SCPSubproblem():
 
         self.epsilon.save_value(epsilon)
 
-        cost = self.problem.solve(solver=cp.ECOS, **cvxpy_kwargs)
-        print(f"Problem status: {self.problem.status}")
+        cost = self.problem.solve(solver=cp.MOSEK, **cvxpy_kwargs)
+        if cvxpy_kwargs is not None and cvxpy_kwargs.get("verbose", False):
+            print(f"Problem status: {self.problem.status}")
         x_out = np.array([self.x[k].value for k in range(self.horizon+1)])
         u_out = np.array([self.u[k].value for k in range(self.horizon)])
         return x_out, u_out, cost

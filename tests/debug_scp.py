@@ -5,21 +5,9 @@ import jax
 from tqdm import tqdm
 from scipy.integrate import solve_ivp
 
-from src.dubins_car import DubinsCar
-from src.scp import SCPSubproblem
-
-def integrate_ground_truth(car, x0, us, dt):
-    horizon = us.shape[0]
-
-    def f(t, x):
-        k = min(int(np.floor(t / dt)), horizon - 1)
-        u = us[k]
-        return np.asarray(car.f(x, u), dtype=float)
-
-    t0, tf = 0.0, float(horizon) * dt
-    t_eval = np.linspace(t0, tf, horizon + 1)
-    sol = solve_ivp(f, (t0, tf), x0, method="RK45", t_eval=t_eval, rtol=1e-8, atol=1e-10)
-    return sol.y.T
+from src.systems.dubins_car import DubinsCar
+from src.solvers.scp import SCPSubproblem
+from src.util import rollout, cumulative_cost, integrate_ground_truth
 
 def debug_jacobians():
     car = DubinsCar(xd = jax.numpy.array([1.0, 1.0, 0.0]))
@@ -65,20 +53,18 @@ def run_traj_opt(method):
         xsoln, usoln, cost = scp.solve(xs[i, :, :], us[i, :, :], epsilon=epsilon, cvxpy_kwargs={"verbose": False})
         # rollout
         xsoln[0, :] = xs[0, 0, :]
-        for k in range(horizon):
-            xsoln[k+1, :] = step(xsoln[k, :], usoln[k, :])
-        # print(f"xsoln: {xsoln}")
-        # print(f"usoln: {usoln}")
-        print(f"cost: {cost}")
-        xs[i+1, :, :] = xsoln
-        us[i+1, :, :] = usoln
+        xs[i + 1, :, :] = rollout(xs[0, 0, :], usoln, car.f, car.dfdx, [dt]*horizon, dynamics_integration=method)
+        us[i + 1, :, :] = usoln
     
     # Compute ground-truth rollout for the final optimized controls
     x_opt = xs[-1]
     u_opt = us[-1]
-    x_gt = integrate_ground_truth(car, x_opt[0], u_opt, dt)
+    x_gt = integrate_ground_truth(car, x_opt[0], u_opt, [dt]*horizon)
     mse = float(np.mean((x_opt - x_gt) ** 2))
-    print(f"MSE(opt_traj vs RK45 ground truth): {mse:.6e}")
+    gt_cost = cumulative_cost(car, x_gt, u_opt, [dt]*horizon)
+    print(f"[{method}] MSE(opt_traj vs RK45 ground truth): {mse:.6e}")
+    print(f"  predicted cost:    {cumulative_cost(car, x_opt, u_opt, [dt]*horizon):.4e}")
+    print(f"  ground truth cost: {gt_cost:.4e}")
 
     fig, ax = plt.subplots()
     cmap = matplotlib.colormaps["plasma"]
@@ -90,7 +76,7 @@ def run_traj_opt(method):
     ax.legend()
     ax.set_aspect("equal")
     ax.set_title(f"SCP trajectory with {method} integration, MSE: {mse:.6e}")
-    plt.savefig(f"scp_trajectory_{method}.png")
+    plt.savefig(f"../plots/scp_trajectory_{method}.png")
     return
 
 if __name__ == "__main__":

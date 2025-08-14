@@ -7,3 +7,4 @@ Requirements
 - tqdm
 - jax
 - ecos
+- mosek

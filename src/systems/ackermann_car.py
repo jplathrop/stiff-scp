@@ -1,4 +1,4 @@
-from src.system import System
+from src.systems.system import System
 
 import jax.numpy as jnp
 from typing import List

@@ -10,18 +10,18 @@ class System(ABC):
         # print("Computing derivatives...")
         tic = time.time()
 
-        self.dfdx_fn = jax.jacfwd(self.f, argnums=0)
-        self.dfdu_fn = jax.jacfwd(self.f, argnums=1)
+        self.dfdx_fn = jax.jit(jax.jacfwd(self.f, argnums=0))
+        self.dfdu_fn = jax.jit(jax.jacfwd(self.f, argnums=1))
 
-        self.dRdx_fn = jax.jacfwd(self.R, argnums=0)
-        self.dRdu_fn = jax.jacfwd(self.R, argnums=1)
+        self.dRdx_fn = jax.jit(jax.jacfwd(self.R, argnums=0))
+        self.dRdu_fn = jax.jit(jax.jacfwd(self.R, argnums=1))
 
-        self.d2Rdx2_fn = jax.hessian(self.R, argnums=0)
-        self.d2Rdxdu_fn = jax.jacfwd(jax.jacfwd(self.R, argnums=0), argnums=1)
-        self.d2Rdu2_fn = jax.hessian(self.R, argnums=1)
+        self.d2Rdx2_fn = jax.jit(jax.hessian(self.R, argnums=0))
+        self.d2Rdxdu_fn = jax.jit(jax.jacfwd(jax.jacfwd(self.R, argnums=0), argnums=1))
+        self.d2Rdu2_fn = jax.jit(jax.hessian(self.R, argnums=1))
 
-        self.dVdx_fn = jax.jacfwd(self.V, argnums=0)
-        self.d2Vdx2_fn = jax.hessian(self.V, argnums=0)
+        self.dVdx_fn = jax.jit(jax.jacfwd(self.V, argnums=0))
+        self.d2Vdx2_fn = jax.jit(jax.hessian(self.V, argnums=0))
 
         toc = time.time()
         # print(f"Time to differentiate: {toc - tic}")

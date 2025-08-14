@@ -3,33 +3,11 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 from tqdm import tqdm
-from scipy.integrate import solve_ivp
 
-from src.ackermann_car import AckermannCar
-from src.scp import SCPSubproblem
+from src.systems.ackermann_car import AckermannCar
+from src.solvers.scp import SCPSubproblem
+from src.util import rollout, integrate_ground_truth, cumulative_cost
 
-
-def integrate_ground_truth(car, x0, us, dt):
-    horizon = us.shape[0]
-
-    def f(t, x):
-        k = min(int(np.floor(t / dt)), horizon - 1)
-        u = us[k]
-        return np.asarray(car.f(x, u), dtype=float)
-
-    t0, tf = 0.0, float(horizon) * dt
-    t_eval = np.linspace(t0, tf, horizon + 1)
-    sol = solve_ivp(f, (t0, tf), x0, method="RK45", t_eval=t_eval, rtol=1e-8, atol=1e-10)
-    return sol.y.T
-
-
-def cumulative_cost(car: AckermannCar, x_traj: np.ndarray, u_seq: np.ndarray) -> float:
-    H = u_seq.shape[0]
-    total = 0.0
-    for k in range(H):
-        total += float(np.asarray(car.R(x_traj[k], u_seq[k])))
-    total += float(np.asarray(car.V(x_traj[H])))
-    return total
 
 def run_traj_opt(method: str):
     horizon = 25
@@ -60,18 +38,15 @@ def run_traj_opt(method: str):
         epsilon = epsilon0 * beta ** i
         xsoln, usoln, cost = scp.solve(xs[i, :, :], us[i, :, :], epsilon=epsilon, cvxpy_kwargs={"verbose": True})
         # rollout with the car dynamics for consistency
-        xsoln[0, :] = xs[0, 0, :]
-        for k in range(horizon):
-            xsoln[k + 1, :] = step(xsoln[k, :], usoln[k, :])
-        xs[i + 1, :, :] = xsoln
+        xs[i + 1, :, :] = rollout(xs[0, 0, :], usoln, car.f, car.dfdx, [dt] * horizon, dynamics_integration=method)
         us[i + 1, :, :] = usoln
 
     # Ground-truth rollout and MSE
     x_opt = xs[-1]
     u_opt = us[-1]
-    x_gt = integrate_ground_truth(car, x_opt[0], u_opt, dt)
+    x_gt = integrate_ground_truth(car, x_opt[0], u_opt, [dt] * horizon)
     mse = float(np.mean((x_opt - x_gt) ** 2))
-    gt_cost = cumulative_cost(car, x_gt, u_opt)
+    gt_cost = cumulative_cost(car, x_gt, u_opt, [dt] * horizon)
     print(f"[{method}] MSE(opt_traj vs RK45 ground truth): {mse:.6e}")
 
     # Plot in XY
@@ -84,12 +59,12 @@ def run_traj_opt(method: str):
     ax.legend()
     ax.set_aspect("equal")
     plt.title(f"Ackermann SCP ({method}), MSE: {mse:.3e}, GT cost: {gt_cost:.3f}")
-    plt.savefig(f"scp_trajectory_ackermann_{method}.png")
+    plt.savefig(f"../plots/scp_trajectory_ackermann_{method}.png")
 
 
 if __name__ == "__main__":
     # run_traj_opt("implicit")
     # run_traj_opt("matrix_exponential")
-    # run_traj_opt("forward_euler")
-    run_traj_opt("backward_euler")
+    run_traj_opt("forward_euler")
+    # run_traj_opt("backward_euler")
 
