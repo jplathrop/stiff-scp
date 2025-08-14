@@ -198,10 +198,10 @@ class AdaptiveSCPSubproblem():
 
         self.epsilon.save_value(epsilon)
 
-        cost = self.problem.solve(solver=cp.MOSEK, **cvxpy_kwargs)
+        value = self.problem.solve(solver=cp.MOSEK, **cvxpy_kwargs)
         if cvxpy_kwargs is not None and cvxpy_kwargs.get("verbose", False):
             print(f"Problem status: {self.problem.status}")
         x_out = np.array([self.x[k].value for k in range(self.num_timesteps+1)])
         u_out = np.array([self.u[k].value for k in range(self.num_timesteps)])
-        return x_out, u_out, cost
+        return x_out, u_out, value
     

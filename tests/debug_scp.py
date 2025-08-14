@@ -3,10 +3,9 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 from tqdm import tqdm
-from scipy.integrate import solve_ivp
 
 from src.systems.dubins_car import DubinsCar
-from src.solvers.scp import SCPSubproblem
+from src.solvers.adaptive_scp import AdaptiveSCPSubproblem
 from src.util import rollout, cumulative_cost, integrate_ground_truth
 
 def debug_jacobians():
@@ -30,7 +29,7 @@ def run_traj_opt(method):
     horizon = 15
     dt = 0.2
     car = DubinsCar(xd = jax.numpy.array([1.0, 1.0, 0.0]))
-    scp = SCPSubproblem(car, horizon, dt, dynamics_integration=method)
+    scp = AdaptiveSCPSubproblem(car, horizon, dynamics_integration=method)
 
     # xnom = np.zeros((horizon+1, 3))
     unom = np.ones((horizon, 2)) * 0.01
@@ -50,7 +49,7 @@ def run_traj_opt(method):
     beta = 0.9 # wait this is actually important, 1.0 makes the traj opt not converge
     for i in tqdm(range(num_iterations), desc="Running SCP"):
         epsilon = epsilon0 * beta ** i
-        xsoln, usoln, cost = scp.solve(xs[i, :, :], us[i, :, :], epsilon=epsilon, cvxpy_kwargs={"verbose": False})
+        xsoln, usoln, cost = scp.solve(xs[i, :, :], us[i, :, :], [dt] * horizon, epsilon=epsilon, cvxpy_kwargs={"verbose": False})
         # rollout
         xsoln[0, :] = xs[0, 0, :]
         xs[i + 1, :, :] = rollout(xs[0, 0, :], usoln, car.f, car.dfdx, [dt]*horizon, dynamics_integration=method)
